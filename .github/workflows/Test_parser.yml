@@ -78,13 +78,20 @@ jobs:
         # Сбор и обработка результатов
         echo ""
         echo "📊 Обработка результатов..."
-        
+
+        cp "$ALL_PROXIES" "$TEMP_DIR/previous.txt"
         for i in $(seq 1 $REQUESTS); do
           if [ -s "$TEMP_DIR/result_$i.txt" ]; then
             SUCCESS=$((SUCCESS + 1))
             COUNT=$(cat "$TEMP_DIR/result_$i.txt" | wc -l)
-            echo "✅ Запрос #$i: +$COUNT прокси - +$ALL_PROXIES"
+    
+            BEFORE=$(cat "$ALL_PROXIES" | wc -l)
             cat "$TEMP_DIR/result_$i.txt" >> "$ALL_PROXIES"
+            sort -u "$ALL_PROXIES" -o "$ALL_PROXIES"
+            AFTER=$(cat "$ALL_PROXIES" | wc -l)
+            NEW_COUNT=$((AFTER - BEFORE))
+    
+            echo "✅ Запрос #$i: +$COUNT прокси, новых: $NEW_COUNT, всего: $AFTER"
           else
             echo "❌ Запрос #$i: нет прокси"
           fi
