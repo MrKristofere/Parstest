@@ -1,0 +1,131 @@
+name: Test Fetch Proxies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+    
+    - name: Install jq (JSON processor)
+      run: sudo apt-get update && sudo apt-get install -y jq
+    
+    - name: Fetch proxies with 25 requests
+      run: |
+        # ⏱️ НАСТРОЙКИ ЗАДЕРЖЕК (меняйте здесь)
+        REQUESTS=25           # количество запросов
+        DELAY_MIN=0.1         # минимальная задержка (сек)
+        DELAY_MAX=0.3         # максимальная задержка (сек)
+        TIMEOUT=10            # тайм-аут на запрос (сек)
+        
+        # Временные файлы
+        TEMP_DIR=$(mktemp -d)
+        ALL_PROXIES="$TEMP_DIR/all_proxies.txt"
+        
+        echo "🚀 Отправляем $REQUESTS запросов к API..."
+        echo "⏱️ Задержки: $DELAY_MIN-$DELAY_MAX сек, тайм-аут: $TIMEOUT сек"
+        echo ""
+        
+        # Функция для одного запроса
+        fetch_one() {
+          local id=$1
+          local result=$(curl -s -w "\n%{http_code}" \
+            -H "User-Agent: DAHL-Mobile-App" \
+            -H "Accept: application/json" \
+            --max-time $TIMEOUT \
+            "https://api.telega.info/v1/auth/proxy" 2>/dev/null)
+          
+          local http_code=$(echo "$result" | tail -n1)
+          local body=$(echo "$result" | sed '$d')
+          
+          if [ "$http_code" = "200" ]; then
+            echo "$body" | jq -r '.proxies[]?' 2>/dev/null | while read proxy; do
+              # Очистка от префиксов
+              echo "$proxy" | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///'
+            done
+            return 0
+          else
+            return 1
+          fi
+        }
+        
+        # Параллельные запросы (максимум 5 одновременно)
+        export -f fetch_one
+        export TIMEOUT
+        
+        # Счетчики
+        SUCCESS=0
+        TOTAL_UNIQUE=0
+        
+        for i in $(seq 1 $REQUESTS); do
+          # Запуск запроса
+          fetch_one $i > "$TEMP_DIR/result_$i.txt" &
+          
+          # Ограничение параллельных процессов (максимум 5)
+          if [ $(jobs -r | wc -l) -ge 5 ]; then
+            wait -n
+          fi
+          
+          # ⏱️ ЗАДЕРЖКА МЕЖДУ ЗАПУСКАМИ (изменяйте DELAY_MIN и DELAY_MAX выше)
+          DELAY=$(echo "scale=2; $DELAY_MIN + ($RANDOM % 10000)/10000 * ($DELAY_MAX - $DELAY_MIN)" | bc)
+          sleep $DELAY
+        done
+        
+        # Ждем завершения всех запросов
+        wait
+        
+        # Сбор и обработка результатов
+        echo ""
+        echo "📊 Обработка результатов..."
+        
+        for i in $(seq 1 $REQUESTS); do
+          if [ -s "$TEMP_DIR/result_$i.txt" ]; then
+            SUCCESS=$((SUCCESS + 1))
+            COUNT=$(cat "$TEMP_DIR/result_$i.txt" | wc -l)
+            echo "✅ Запрос #$i: +$COUNT прокси"
+            cat "$TEMP_DIR/result_$i.txt" >> "$ALL_PROXIES"
+          else
+            echo "❌ Запрос #$i: нет прокси"
+          fi
+        done
+        
+        # Удаление дубликатов и сортировка
+        echo ""
+        echo "📊 Удаление дубликатов..."
+        sort -u "$ALL_PROXIES" -o "$ALL_PROXIES"
+        TOTAL_UNIQUE=$(cat "$ALL_PROXIES" | wc -l)
+        
+        # Сохранение результата
+        echo "# Telega Proxy List" > proxies.txt
+        echo "# Дата: $(date '+%Y-%m-%d %H:%M:%S')" >> proxies.txt
+        echo "# Запросов: $REQUESTS" >> proxies.txt
+        echo "# Успешных: $SUCCESS" >> proxies.txt
+        echo "# Уникальных: $TOTAL_UNIQUE" >> proxies.txt
+        echo "# ==================================================" >> proxies.txt
+        echo "" >> proxies.txt
+        cat "$ALL_PROXIES" >> proxies.txt
+        
+        echo ""
+        echo "✅ Готово!"
+        echo "📊 Успешных запросов: $SUCCESS/$REQUESTS"
+        echo "📊 Уникальных прокси: $TOTAL_UNIQUE"
+        
+        # Показываем примеры
+        if [ $TOTAL_UNIQUE -gt 0 ]; then
+          echo ""
+          echo "📋 Примеры прокси (первые 5):"
+          head -5 "$ALL_PROXIES" | while read proxy; do
+            echo "   • $proxy"
+          done
+        fi
+    
+    - name: Upload proxies as artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: telega-proxies
+        path: proxies.txt
+        retention-days: 30
