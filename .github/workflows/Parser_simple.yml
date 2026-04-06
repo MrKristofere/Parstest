@@ -15,39 +15,58 @@ jobs:
       run: |
         # ===== НАСТРОЙКИ =====
         REQUESTS=30        # количество запросов
+        PARALLEL=5         # параллельных потоков
         DELAY_MIN=0.1      # мин. задержка (сек)
         DELAY_MAX=0.3      # макс. задержка (сек)
         TIMEOUT=10         # тайм-аут (сек)
         # ====================
         
-        ALL_PROXIES=$(mktemp)
-        SUCCESS=0
+        TEMP_DIR=$(mktemp -d)
+        ALL_PROXIES="$TEMP_DIR/all.txt"
+        touch "$ALL_PROXIES"
         
-        echo "🚀 $REQUESTS запросов (задержка $DELAY_MIN-$DELAY_MAX сек, тайм-аут $TIMEOUT сек)"
+        echo "🚀 $REQUESTS запросов (параллельно: $PARALLEL, задержка $DELAY_MIN-$DELAY_MAX сек, тайм-аут $TIMEOUT сек)"
         
-        for i in $(seq 1 $REQUESTS); do
-          # Запрос
-          RESPONSE=$(curl -s -H "User-Agent: DAHL-Mobile-App" -H "Accept: application/json" \
-            --max-time $TIMEOUT "https://api.telega.info/v1/auth/proxy")
+        # Функция запроса
+        fetch_one() {
+          local id=$1
+          local out="$TEMP_DIR/r$id.txt"
+          curl -s --max-time $TIMEOUT \
+            -H "User-Agent: DAHL-Mobile-App" \
+            -H "Accept: application/json" \
+            "https://api.telega.info/v1/auth/proxy" > "$out" 2>/dev/null
           
-          if [ $? -eq 0 ] && echo "$RESPONSE" | jq -e '.proxies' >/dev/null 2>&1; then
-            COUNT=$(echo "$RESPONSE" | jq -r '.proxies[]?' | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///' | wc -l)
-            
-            # Подсчёт новых
-            BEFORE=$(cat "$ALL_PROXIES" 2>/dev/null | wc -l)
-            echo "$RESPONSE" | jq -r '.proxies[]?' | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///' >> "$ALL_PROXIES"
+          if [ -s "$out" ] && jq -e '.proxies' "$out" >/dev/null 2>&1; then
+            jq -r '.proxies[]?' "$out" | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///' > "$TEMP_DIR/p$id.txt"
+            echo "$id:$(cat "$TEMP_DIR/p$id.txt" | wc -l)"
+          else
+            echo "$id:0"
+          fi
+        }
+        export -f fetch_one
+        export TEMP_DIR TIMEOUT
+        
+        # Запуск параллельных запросов
+        for i in $(seq 1 $REQUESTS); do
+          echo "$i" | xargs -I {} -P $PARALLEL bash -c 'fetch_one "$@"' _ {} &
+          sleep $(echo "scale=2; $DELAY_MIN + ($RANDOM % 10000)/10000 * ($DELAY_MAX - $DELAY_MIN)" | bc)
+        done
+        wait
+        
+        # Сбор результатов
+        SUCCESS=0
+        for i in $(seq 1 $REQUESTS); do
+          if [ -f "$TEMP_DIR/p$i.txt" ] && [ -s "$TEMP_DIR/p$i.txt" ]; then
+            COUNT=$(cat "$TEMP_DIR/p$i.txt" | wc -l)
+            BEFORE=$(cat "$ALL_PROXIES" | wc -l)
+            cat "$TEMP_DIR/p$i.txt" >> "$ALL_PROXIES"
             sort -u -o "$ALL_PROXIES" "$ALL_PROXIES"
             AFTER=$(cat "$ALL_PROXIES" | wc -l)
-            NEW=$((AFTER - BEFORE))
-            
-            echo "✅ #$i: +$COUNT прокси, новых: $NEW, всего: $AFTER"
+            echo "✅ #$i: +$COUNT прокси, новых: $((AFTER - BEFORE)), всего: $AFTER"
             SUCCESS=$((SUCCESS + 1))
           else
             echo "❌ #$i: ошибка"
           fi
-          
-          # Задержка (кроме последнего)
-          [ $i -lt $REQUESTS ] && sleep $(echo "scale=2; $DELAY_MIN + ($RANDOM % 10000)/10000 * ($DELAY_MAX - $DELAY_MIN)" | bc)
         done
         
         # Сохранение
@@ -55,7 +74,7 @@ jobs:
         {
           echo "# Telega Proxy List"
           echo "# Дата: $(date '+%Y-%m-%d %H:%M:%S')"
-          echo "# Запросов: $REQUESTS | Успешных: $SUCCESS | Уникальных: $TOTAL"
+          echo "# Запросов: $REQUESTS | Параллельно: $PARALLEL | Успешных: $SUCCESS | Уникальных: $TOTAL"
           echo "# =================================================="
           echo ""
           cat "$ALL_PROXIES"
@@ -63,8 +82,8 @@ jobs:
         
         echo ""
         echo "✅ Готово! Уникальных прокси: $TOTAL"
-        echo "📋 Список прокси:"
-        cat "$ALL_PROXIES" | sed 's/^/   • /'
+        cat "$ALL_PROXIES" | head -10 | sed 's/^/   • /'
+        [ $TOTAL -gt 10 ] && echo "   ... и еще $((TOTAL - 10))"
     
     - name: Upload proxies
       uses: actions/upload-artifact@v7
