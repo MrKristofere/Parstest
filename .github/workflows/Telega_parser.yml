@@ -1,0 +1,34 @@
+name: Fetch Telega Proxies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+    
+    - name: Setup Python
+      uses: actions/setup-python@v6
+    
+    - name: Install dependencies
+      run: |
+        pip install requests
+    
+    - name: Fetch proxies
+      run: python fetch_telega_proxies.py
+    
+    - name: Upload proxies as artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: telega-proxies
+        path: proxies.txt
+        retention-days: 30
+    
+    - name: Show download link
+      run: |
+        echo "📥 Скачать прокси:"
+        echo "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
