@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+    
     - name: Install jq (JSON processor)
       run: sudo apt-get update && sudo apt-get install -y jq
     
@@ -22,6 +23,7 @@ jobs:
         # Временные файлы
         TEMP_DIR=$(mktemp -d)
         ALL_PROXIES="$TEMP_DIR/all_proxies.txt"
+        touch "$ALL_PROXIES"
         
         echo "🚀 Отправляем $REQUESTS запросов к API..."
         echo "⏱️ Задержки: $DELAY_MIN-$DELAY_MAX сек, тайм-аут: $TIMEOUT сек"
@@ -40,10 +42,7 @@ jobs:
           local body=$(echo "$result" | sed '$d')
           
           if [ "$http_code" = "200" ]; then
-            echo "$body" | jq -r '.proxies[]?' 2>/dev/null | while read proxy; do
-              # Очистка от префиксов
-              echo "$proxy" | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///'
-            done
+            echo "$body" | jq -r '.proxies[]?' 2>/dev/null | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///'
             return 0
           else
             return 1
@@ -56,7 +55,6 @@ jobs:
         
         # Счетчики
         SUCCESS=0
-        TOTAL_UNIQUE=0
         
         for i in $(seq 1 $REQUESTS); do
           # Запуск запроса
@@ -75,32 +73,32 @@ jobs:
         # Ждем завершения всех запросов
         wait
         
-        # Сбор и обработка результатов
+        # Сбор и обработка результатов с подсчетом новых прокси
         echo ""
         echo "📊 Обработка результатов..."
-
+        
+        # Сохраняем текущий список для подсчета новых
         cp "$ALL_PROXIES" "$TEMP_DIR/previous.txt"
+        
         for i in $(seq 1 $REQUESTS); do
           if [ -s "$TEMP_DIR/result_$i.txt" ]; then
             SUCCESS=$((SUCCESS + 1))
             COUNT=$(cat "$TEMP_DIR/result_$i.txt" | wc -l)
-    
+            
+            # Подсчет новых прокси в этом запросе
             BEFORE=$(cat "$ALL_PROXIES" | wc -l)
             cat "$TEMP_DIR/result_$i.txt" >> "$ALL_PROXIES"
             sort -u "$ALL_PROXIES" -o "$ALL_PROXIES"
             AFTER=$(cat "$ALL_PROXIES" | wc -l)
             NEW_COUNT=$((AFTER - BEFORE))
-    
+            
             echo "✅ Запрос #$i: +$COUNT прокси, новых: $NEW_COUNT, всего: $AFTER"
           else
             echo "❌ Запрос #$i: нет прокси"
           fi
         done
         
-        # Удаление дубликатов и сортировка
-        echo ""
-        echo "📊 Удаление дубликатов..."
-        sort -u "$ALL_PROXIES" -o "$ALL_PROXIES"
+        # Финальное удаление дубликатов и сортировка
         TOTAL_UNIQUE=$(cat "$ALL_PROXIES" | wc -l)
         
         # Сохранение результата
@@ -118,11 +116,11 @@ jobs:
         echo "📊 Успешных запросов: $SUCCESS/$REQUESTS"
         echo "📊 Уникальных прокси: $TOTAL_UNIQUE"
         
-        # Показываем примеры
+        # Показываем все прокси
         if [ $TOTAL_UNIQUE -gt 0 ]; then
           echo ""
           echo "📋 Список прокси:"
-          head -30 "$ALL_PROXIES" | while read proxy; do
+          cat "$ALL_PROXIES" | while read proxy; do
             echo "   • $proxy"
           done
         fi
