@@ -1,4 +1,4 @@
-name: Simple Fetch Proxies
+name: Simple Test Parser
 
 on:
   workflow_dispatch:
