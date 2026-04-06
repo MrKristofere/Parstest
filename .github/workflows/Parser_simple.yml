@@ -1,0 +1,74 @@
+name: Simple Fetch Proxies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Install jq
+      run: sudo apt-get update && sudo apt-get install -y jq
+    
+    - name: Fetch proxies
+      run: |
+        # ===== НАСТРОЙКИ =====
+        REQUESTS=30        # количество запросов
+        DELAY_MIN=0.1      # мин. задержка (сек)
+        DELAY_MAX=0.3      # макс. задержка (сек)
+        TIMEOUT=10         # тайм-аут (сек)
+        # ====================
+        
+        ALL_PROXIES=$(mktemp)
+        SUCCESS=0
+        
+        echo "🚀 $REQUESTS запросов (задержка $DELAY_MIN-$DELAY_MAX сек, тайм-аут $TIMEOUT сек)"
+        
+        for i in $(seq 1 $REQUESTS); do
+          # Запрос
+          RESPONSE=$(curl -s -H "User-Agent: DAHL-Mobile-App" -H "Accept: application/json" \
+            --max-time $TIMEOUT "https://api.telega.info/v1/auth/proxy")
+          
+          if [ $? -eq 0 ] && echo "$RESPONSE" | jq -e '.proxies' >/dev/null 2>&1; then
+            COUNT=$(echo "$RESPONSE" | jq -r '.proxies[]?' | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///' | wc -l)
+            
+            # Подсчёт новых
+            BEFORE=$(cat "$ALL_PROXIES" 2>/dev/null | wc -l)
+            echo "$RESPONSE" | jq -r '.proxies[]?' | sed 's/^tcp:\/\///;s/^http:\/\///;s/^https:\/\///' >> "$ALL_PROXIES"
+            sort -u -o "$ALL_PROXIES" "$ALL_PROXIES"
+            AFTER=$(cat "$ALL_PROXIES" | wc -l)
+            NEW=$((AFTER - BEFORE))
+            
+            echo "✅ #$i: +$COUNT прокси, новых: $NEW, всего: $AFTER"
+            SUCCESS=$((SUCCESS + 1))
+          else
+            echo "❌ #$i: ошибка"
+          fi
+          
+          # Задержка (кроме последнего)
+          [ $i -lt $REQUESTS ] && sleep $(echo "scale=2; $DELAY_MIN + ($RANDOM % 10000)/10000 * ($DELAY_MAX - $DELAY_MIN)" | bc)
+        done
+        
+        # Сохранение
+        TOTAL=$(cat "$ALL_PROXIES" | wc -l)
+        {
+          echo "# Telega Proxy List"
+          echo "# Дата: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "# Запросов: $REQUESTS | Успешных: $SUCCESS | Уникальных: $TOTAL"
+          echo "# =================================================="
+          echo ""
+          cat "$ALL_PROXIES"
+        } > proxies.txt
+        
+        echo ""
+        echo "✅ Готово! Уникальных прокси: $TOTAL"
+        echo "📋 Список прокси:"
+        cat "$ALL_PROXIES" | sed 's/^/   • /'
+    
+    - name: Upload proxies
+      uses: actions/upload-artifact@v7
+      with:
+        name: telega-proxies
+        path: proxies.txt
+        retention-days: 30
