@@ -8,13 +8,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v6
-    
     - name: Install jq (JSON processor)
       run: sudo apt-get update && sudo apt-get install -y jq
     
-    - name: Fetch proxies with 25 requests
+    - name: Fetch proxies requests
       run: |
         # ⏱️ НАСТРОЙКИ ЗАДЕРЖЕК (меняйте здесь)
         REQUESTS=25           # количество запросов
@@ -86,7 +83,7 @@ jobs:
           if [ -s "$TEMP_DIR/result_$i.txt" ]; then
             SUCCESS=$((SUCCESS + 1))
             COUNT=$(cat "$TEMP_DIR/result_$i.txt" | wc -l)
-            echo "✅ Запрос #$i: +$COUNT прокси"
+            echo "✅ Запрос #$i: +$COUNT прокси - +$ALL_PROXIES"
             cat "$TEMP_DIR/result_$i.txt" >> "$ALL_PROXIES"
           else
             echo "❌ Запрос #$i: нет прокси"
@@ -117,8 +114,8 @@ jobs:
         # Показываем примеры
         if [ $TOTAL_UNIQUE -gt 0 ]; then
           echo ""
-          echo "📋 Примеры прокси (первые 5):"
-          head -5 "$ALL_PROXIES" | while read proxy; do
+          echo "📋 Список прокси:"
+          head -30 "$ALL_PROXIES" | while read proxy; do
             echo "   • $proxy"
           done
         fi
